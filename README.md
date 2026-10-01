@@ -13,6 +13,7 @@ The focus is **latency**. A naive voice pipeline waits for each stage to finish 
 ## ✨ Features
 
 - 🗣️ **Push-to-talk in the browser.** Hold the button or the space bar. Audio is uploaded *while* you speak.
+- 🎧 **Hands-free mode.** Voice activity detection notices when you start and stop talking. It calibrates to the room's noise, ignores clicks and coughs, and starts recording early so the first syllable is never cut off.
 - ⚡ **Sentence-level streaming.** Every finished sentence goes to TTS immediately, without waiting for the full reply.
 - 🔀 **Parallel TTS, ordered playback.** Sentences are synthesized concurrently and played strictly in order.
 - ✋ **Barge-in.** Start talking while the assistant speaks: its reply is cancelled end to end via `AbortSignal`.
@@ -64,6 +65,7 @@ src/
     ├── voice-pipeline.ts        # one turn: STT → LLM → chunker → TTS
     └── sentence-chunker.ts      # turns text deltas into speakable chunks
 public/index.html                # zero-build browser client
+public/vad.js                    # voice activity detection for hands-free mode
 ```
 
 ## ⏱️ Where the latency goes
@@ -137,12 +139,11 @@ npm test          # Vitest
 npm run typecheck
 ```
 
-The pipeline is tested with fake providers. The tests cover sentence chunking (including Ukrainian), parallel synthesis with in-order delivery, TTS starting before the LLM finishes, conversation history, latency metrics and failure handling.
+The pipeline is tested with fake providers. The tests cover sentence chunking (including Ukrainian), parallel synthesis with in-order delivery, TTS starting before the LLM finishes, conversation history, latency metrics and failure handling. The voice activity detector is tested as a pure state machine: calibration, noisy rooms, click rejection and forced utterance limits.
 
 ## 🛣️ Ideas for next steps
 
 - Streaming STT (partial transcripts) instead of per-utterance Whisper
-- Voice activity detection for hands-free mode
 - Streaming TTS over the ElevenLabs WebSocket API
 - Per-stage tracing with OpenTelemetry
 
