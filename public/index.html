@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Realtime Voice AI</title>
+  <style>
+    :root {
+      --bg: #0f0c29; --panel: #1a1640; --text: #e8e6ff; --muted: #9a96c8;
+      --accent: #24c6dc; --accent-2: #7b61ff; --danger: #ff5c7a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at top, #302b63, var(--bg) 60%); color: var(--text);
+      display: flex; justify-content: center; padding: 32px 16px;
+    }
+    main { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 20px; }
+    h1 { margin: 0; font-size: 28px; }
+    .sub { color: var(--muted); margin: 4px 0 0; }
+    #log {
+      background: var(--panel); border-radius: 16px; padding: 16px; min-height: 280px;
+      max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+    }
+    .msg { padding: 10px 14px; border-radius: 12px; max-width: 85%; line-height: 1.45; }
+    .user { align-self: flex-end; background: var(--accent-2); }
+    .assistant { align-self: flex-start; background: #262058; }
+    .error { align-self: center; color: var(--danger); font-size: 14px; }
+    .empty { color: var(--muted); margin: auto; text-align: center; }
+    #talk {
+      align-self: center; width: 120px; height: 120px; border-radius: 50%; border: none;
+      font-size: 15px; font-weight: 600; color: #0f0c29; cursor: pointer; user-select: none;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: 0 0 0 0 rgba(36, 198, 220, .6); transition: transform .1s;
+    }
+    #talk.recording { transform: scale(1.08); animation: pulse 1.2s infinite; }
+    #talk:disabled { opacity: .5; cursor: not-allowed; }
+    @keyframes pulse { 70% { box-shadow: 0 0 0 24px rgba(36, 198, 220, 0); } }
+    .hint { text-align: center; color: var(--muted); font-size: 14px; margin: 0; }
+    #metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .metric { background: var(--panel); border-radius: 12px; padding: 12px; text-align: center; }
+    .metric b { display: block; font-size: 20px; color: var(--accent); }
+    .metric span { font-size: 12px; color: var(--muted); }
+    @media (max-width: 520px) { #metrics { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>🎙️ Realtime Voice AI</h1>
+    <p class="sub">Whisper → LLM → ElevenLabs, streamed sentence by sentence over WebSockets</p>
+  </header>
+
+  <section id="log"><p class="empty">Hold the button (or the space bar) and speak.</p></section>
+
+  <button id="talk" disabled>Connecting…</button>
+  <p class="hint">Talking while the assistant speaks interrupts it.</p>
+
+  <section id="metrics">
+    <div class="metric"><b id="m-stt">–</b><span>Speech-to-text</span></div>
+    <div class="metric"><b id="m-llm">–</b><span>LLM first token</span></div>
+    <div class="metric"><b id="m-audio">–</b><span>First audio</span></div>
+    <div class="metric"><b id="m-total">–</b><span>Full turn</span></div>
+  </section>
+</main>
+
+<script>
+  const log = document.getElementById('log');
+  const talk = document.getElementById('talk');
+  const mimeType = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4']
+    .find((type) => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) ?? '';
+
+  let socket, recorder, stream, assistantBubble;
+  let playQueue = [], current = null;
+
+  function addMessage(cls, text) {
+    log.querySelector('.empty')?.remove();
+    const el = document.createElement('div');
+    el.className = `msg ${cls}`;
+    el.textContent = text;
+    log.append(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+
+  function stopPlayback() {
+    playQueue = [];
+    if (current) { current.pause(); URL.revokeObjectURL(current.src); current = null; }
+  }
+
+  function playNext() {
+    if (current || playQueue.length === 0) return;
+    const bytes = Uint8Array.from(atob(playQueue.shift()), (c) => c.charCodeAt(0));
+    current = new Audio(URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' })));
+    current.onended = () => { URL.revokeObjectURL(current.src); current = null; playNext(); };
+    current.play().catch(() => { current = null; playNext(); });
+  }
+
+  function setMetric(id, ms) { document.getElementById(id).textContent = `${(ms / 1000).toFixed(2)} s`; }
+
+  function connect() {
+    const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+    socket = new WebSocket(`${protocol}://${location.host}/voice`);
+    socket.onopen = () => { talk.disabled = false; talk.textContent = 'Hold to talk'; };
+    socket.onclose = () => {
+      talk.disabled = true; talk.textContent = 'Reconnecting…';
+      setTimeout(connect, 1500);
+    };
+    socket.onmessage = ({ data }) => {
+      const event = JSON.parse(data);
+      switch (event.type) {
+        case 'transcript':
+          if (event.text) { addMessage('user', event.text); assistantBubble = addMessage('assistant', ''); }
+          break;
+        case 'reply_delta':
+          if (assistantBubble) assistantBubble.textContent += event.text;
+          log.scrollTop = log.scrollHeight;
+          break;
+        case 'audio':
+          playQueue.push(event.data); playNext();
+          break;
+        case 'metrics':
+          setMetric('m-stt', event.metrics.sttMs);
+          setMetric('m-llm', event.metrics.llmFirstTokenMs);
+          setMetric('m-audio', event.metrics.firstAudioMs);
+          setMetric('m-total', event.metrics.totalMs);
+          break;
+        case 'error':
+          addMessage('error', event.message);
+          break;
+      }
+    };
+  }
+
+  async function startRecording() {
+    if (recorder?.state === 'recording' || socket?.readyState !== WebSocket.OPEN) return;
+    stopPlayback(); // barge-in
+    try {
+      stream ??= await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      addMessage('error', 'Microphone access is needed to talk.');
+      return;
+    }
+    recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    socket.send(JSON.stringify({ type: 'start', mimeType: recorder.mimeType }));
+    // Upload audio while the user is still speaking, so nothing is left to send on release.
+    recorder.ondataavailable = ({ data }) => { if (data.size > 0) socket.send(data); };
+    recorder.onstop = () => socket.send(JSON.stringify({ type: 'stop' }));
+    recorder.start(250);
+    talk.classList.add('recording');
+    talk.textContent = 'Listening…';
+  }
+
+  function stopRecording() {
+    if (recorder?.state !== 'recording') return;
+    recorder.stop();
+    talk.classList.remove('recording');
+    talk.textContent = 'Hold to talk';
+  }
+
+  talk.addEventListener('pointerdown', startRecording);
+  talk.addEventListener('pointerup', stopRecording);
+  talk.addEventListener('pointerleave', stopRecording);
+  document.addEventListener('keydown', (e) => { if (e.code === 'Space' && !e.repeat) { e.preventDefault(); startRecording(); } });
+  document.addEventListener('keyup', (e) => { if (e.code === 'Space') { e.preventDefault(); stopRecording(); } });
+
+  connect();
+</script>
+</body>
+</html>

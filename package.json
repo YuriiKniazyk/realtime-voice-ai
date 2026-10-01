@@ -1,0 +1,38 @@
+{
+  "name": "realtime-voice-ai",
+  "version": "1.0.0",
+  "description": "Real-time voice AI assistant: speech-to-text, a streaming LLM and text-to-speech over WebSockets, built with NestJS.",
+  "license": "MIT",
+  "author": "Yurii Kniazyk",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "dev": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@nestjs/common": "^12.1.2",
+    "@nestjs/core": "^12.1.2",
+    "@nestjs/platform-express": "^12.1.2",
+    "@nestjs/platform-ws": "^12.1.2",
+    "@nestjs/websockets": "^12.1.2",
+    "openai": "^7.25.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.3",
+    "@types/ws": "^8.18.2",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.3"
+  },
+  "type": "module"
+}
